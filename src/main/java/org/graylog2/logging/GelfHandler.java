@@ -21,6 +21,42 @@ public class GelfHandler
         extends Handler
 {
     private static final int MAX_SHORT_MESSAGE_LENGTH = 250;
+    private static final Map<String, Integer> LOG4J_LOGLEVELS;
+
+    private enum SyslogLevels {
+        EMERGENCY(0),
+        ALERT(1),
+        CRITICAL(2),
+        ERROR(3),
+        WARNING(4),
+        NOTICE(5),
+        INFORMAT(6),
+        DEBUG(7);
+
+        private int level;
+
+        private SyslogLevels(int level) {
+            this.level = level;
+        }
+
+        public int getLevel() {
+            return this.level;
+        }
+
+    }
+
+    static {
+
+        Map<String, Integer> log4jMap = new HashMap<String, Integer>(6);
+        log4jMap.put("FATAL", SyslogLevels.CRITICAL.getLevel());
+        log4jMap.put("ERROR", SyslogLevels.ERROR.getLevel());
+        log4jMap.put("WARN", SyslogLevels.WARNING.getLevel());
+        log4jMap.put("INFO", SyslogLevels.INFORMAT.getLevel());
+        log4jMap.put("DEBUG", SyslogLevels.DEBUG.getLevel());
+        log4jMap.put("TRACE", SyslogLevels.DEBUG.getLevel());
+
+        LOG4J_LOGLEVELS = log4jMap;
+    }
 
     private String graylogHost;
     private String originHost;
@@ -262,19 +298,21 @@ public class GelfHandler
         final int syslogLevel;
         if ( level == Level.SEVERE )
         {
-            syslogLevel = 3;
+            syslogLevel = SyslogLevels.ERROR.getLevel();
         }
         else if ( level == Level.WARNING )
         {
-            syslogLevel = 4;
+            syslogLevel = SyslogLevels.WARNING.getLevel();
         }
         else if ( level == Level.INFO )
         {
-            syslogLevel = 6;
+            syslogLevel = SyslogLevels.INFORMAT.getLevel();
         }
         else
         {
-            syslogLevel = 7;
+            //try to figure out loglevel
+            Integer log4jLevel = LOG4J_LOGLEVELS.get(level.getName());
+            syslogLevel = log4jLevel == null ? 7 : log4jLevel;
         }
         return syslogLevel;
     }
