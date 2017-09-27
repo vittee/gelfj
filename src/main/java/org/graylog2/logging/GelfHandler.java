@@ -271,6 +271,11 @@ public class GelfHandler
                         String.valueOf( levelToSyslogLevel( record.getLevel() ) ) );
         gelfMessage.addField( "SourceClassName", record.getSourceClassName() );
         gelfMessage.addField( "SourceMethodName", record.getSourceMethodName() );
+        
+        final String instanceName = System.getProperty("jboss.server.name");
+        if (instanceName != null && !instanceName.isEmpty()) {
+           gelfMessage.addField("instanceName", instanceName);
+        }
 
         if ( null != getOriginHost() )
         {
