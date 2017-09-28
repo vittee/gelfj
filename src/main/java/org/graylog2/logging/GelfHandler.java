@@ -6,6 +6,7 @@ import org.graylog2.GelfTCPSender;
 import org.graylog2.GelfUDPSender;
 import org.jboss.logmanager.ExtHandler;
 import org.jboss.logmanager.ExtLogRecord;
+import org.jboss.logmanager.MDC;
 
 import java.io.IOException;
 import java.io.PrintWriter;
@@ -65,6 +66,7 @@ public class GelfHandler extends ExtHandler {
     private GelfSender gelfSender;
     private boolean extractStacktrace;
     private Map<String, String> fields;
+    private String remoteAddrMDC = "remoteAddr";
 
     public GelfHandler() {
         final LogManager manager = LogManager.getLogManager();
@@ -111,7 +113,7 @@ public class GelfHandler extends ExtHandler {
         //This only used for testing
         final String testSender = manager.getProperty(prefix + ".graylogTestSenderClass");
         try {
-            if (null != testSender) {
+            if (testSender != null) {
                 final Class clazz = ClassLoader.getSystemClassLoader().loadClass(testSender);
                 gelfSender = (GelfSender) clazz.newInstance();
             }
@@ -148,17 +150,24 @@ public class GelfHandler extends ExtHandler {
 
         String formatted;
         try {
-            formatted = formatter.format(record);
-        } catch (Exception var9) {
-            this.reportError("Formatting error", var9, 5);
+            String message = record.getMessage();
+            if (message == null) message = "";
+
+            formatted = (formatter != null) ? formatter.format(record) : message;
+
+        } catch (Exception e) {
+            this.reportError("Formatting error", e, ErrorManager.FORMAT_FAILURE);
             return;
         }
 
         if (formatted.length() == 0) {
+            reportError("Formatted string is empty", null, ErrorManager.FORMAT_FAILURE);
             return;
         }
 
+
         if (gelfSender == null) {
+
             if (graylogHost == null) {
                 reportError("Graylog2 hostname is empty!", null, ErrorManager.WRITE_FAILURE);
                 return;
@@ -181,8 +190,13 @@ public class GelfHandler extends ExtHandler {
             }
         }
 
-        if (gelfSender == null || !gelfSender.sendMessage(makeMessage(record))) {
-            reportError("Could not send GELF message", null, ErrorManager.WRITE_FAILURE);
+        try {
+            if (gelfSender == null || !gelfSender.sendMessage(makeMessage(record))) {
+                reportError("Could not send GELF message", null, ErrorManager.WRITE_FAILURE);
+            }
+        }
+        catch (Exception e) {
+            reportError("Could not send GELF message", e, ErrorManager.WRITE_FAILURE);
         }
     }
 
@@ -195,34 +209,50 @@ public class GelfHandler extends ExtHandler {
         }
     }
 
-    private GelfMessage makeMessage(final LogRecord record) {
+    private String formatMessage(LogRecord record) {
         String message = record.getMessage();
-        Object[] parameters = record.getParameters();
 
-        if (message == null) message = "";
-        if (parameters != null && parameters.length > 0) {
-            //by default, using {0}, {1}, etc. -> MessageFormat
-            message = MessageFormat.format(message, parameters);
+        if (message == null) {
+            message = "";
+        }
 
-            if (message.equals(record.getMessage())) {
-                //if the text is the same, assuming this is String.format type log (%s, %d, etc.)
-                try {
-                    message = String.format(message, parameters);
-                } catch (IllegalFormatConversionException e) {
-                    //leaving message as it is to avoid compatibility problems
-                    message = record.getMessage();
-                } catch (NullPointerException e) {
-                    //ignore
+        try {
+            Formatter formatter = this.getFormatter();
+            if (formatter != null) {
+                return formatter.format(record);
+            }
+
+
+            Object[] parameters = record.getParameters();
+
+            if (parameters != null && parameters.length > 0) {
+                //by default, using {0}, {1}, etc. -> MessageFormat
+                message = MessageFormat.format(message, parameters);
+
+                if (message.equals(record.getMessage())) {
+                    //if the text is the same, assuming this is String.format type log (%s, %d, etc.)
+                    try {
+                        message = String.format(message, parameters);
+                    } catch (IllegalFormatConversionException e) {
+                        //leaving message as it is to avoid compatibility problems
+                        message = record.getMessage();
+                    } catch (NullPointerException e) {
+                        //ignore
+                    }
                 }
             }
+
+        } catch (Exception e) {
+            this.reportError("Formatting error", e, 5);
         }
 
-        final String shortMessage;
-        if (message.length() > MAX_SHORT_MESSAGE_LENGTH) {
-            shortMessage = message.substring(0, MAX_SHORT_MESSAGE_LENGTH - 1);
-        } else {
-            shortMessage = message;
-        }
+        return message;
+    }
+
+    private GelfMessage makeMessage(final ExtLogRecord record) {
+        String message = formatMessage(record);
+
+        final String shortMessage = message.length() > MAX_SHORT_MESSAGE_LENGTH ? message.substring(0, MAX_SHORT_MESSAGE_LENGTH - 1) : message;
 
         if (extractStacktrace) {
             final Throwable thrown = record.getThrown();
@@ -234,6 +264,7 @@ public class GelfHandler extends ExtHandler {
         }
 
         final GelfMessage gelfMessage = new GelfMessage(shortMessage, message, record.getMillis(), String.valueOf(levelToSyslogLevel(record.getLevel())));
+        gelfMessage.addField("category", record.getLoggerName());
         gelfMessage.addField("SourceClassName", record.getSourceClassName());
         gelfMessage.addField("SourceMethodName", record.getSourceMethodName());
 
@@ -242,15 +273,25 @@ public class GelfHandler extends ExtHandler {
             gelfMessage.addField("instanceName", instanceName);
         }
 
-        if (null != getOriginHost()) {
+        if (getOriginHost() != null) {
             gelfMessage.setHost(getOriginHost());
         }
 
-        if (null != facility) {
+        if (facility != null) {
             gelfMessage.setFacility(facility);
         }
 
-        if (null != fields) {
+
+        if (remoteAddrMDC != null) {
+            String remoteAddr = record.getMdc(remoteAddrMDC);
+
+            if (remoteAddr != null) {
+                gelfMessage.addField(remoteAddrMDC, remoteAddr);
+            }
+        }
+
+
+        if (fields != null) {
             for (final Map.Entry<String, String> entry : fields.entrySet()) {
                 gelfMessage.addField(entry.getKey(), entry.getValue());
             }
@@ -293,5 +334,9 @@ public class GelfHandler extends ExtHandler {
 
     public void setFacility(String facility) {
         this.facility = facility;
+    }
+
+    public void setRemoteAddrMDC(String mdc) {
+        this.remoteAddrMDC = mdc;
     }
 }
