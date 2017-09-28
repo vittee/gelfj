@@ -4,6 +4,8 @@ import org.graylog2.GelfMessage;
 import org.graylog2.GelfSender;
 import org.graylog2.GelfTCPSender;
 import org.graylog2.GelfUDPSender;
+import org.jboss.logmanager.ExtHandler;
+import org.jboss.logmanager.ExtLogRecord;
 
 import java.io.IOException;
 import java.io.PrintWriter;
@@ -17,8 +19,7 @@ import java.util.IllegalFormatConversionException;
 import java.util.Map;
 import java.util.logging.*;
 
-public class GelfHandler
-        extends Handler
+public class GelfHandler extends ExtHandler
 {
     private static final int MAX_SHORT_MESSAGE_LENGTH = 250;
     private static final Map<String, Integer> LOG4J_LOGLEVELS;
@@ -165,49 +166,49 @@ public class GelfHandler
     }
 
     @Override
-    public synchronized void publish( final LogRecord record )
-    {
-        if ( !isLoggable( record ) )
-        {
+    protected void doPublish(ExtLogRecord record) {
+        Formatter formatter = this.getFormatter();
+
+        String formatted;
+        try {
+            formatted = formatter.format(record);
+        } catch (Exception var9) {
+            this.reportError("Formatting error", var9, 5);
             return;
         }
-        if ( null == gelfSender )
-        {
-			if (graylogHost == null) {
-				reportError("Graylog2 hostname is empty!", null, ErrorManager.WRITE_FAILURE);
-			} else {
-				try
-				{
-					if (graylogHost.startsWith("tcp:")) {
-						String tcpGraylogHost = graylogHost.substring(0, 4);
-						gelfSender = new GelfTCPSender(tcpGraylogHost, graylogPort);
-					} else if (graylogHost.startsWith("udp:")) {
-						String udpGraylogHost = graylogHost.substring(0, 4);
-						gelfSender = new GelfUDPSender(udpGraylogHost, graylogPort);
-					} else {
-						gelfSender = new GelfUDPSender(graylogHost, graylogPort);
-					}
-				}
-				catch ( UnknownHostException e )
-				{
-					reportError( "Unknown Graylog2 hostname:" + graylogHost, e, ErrorManager.WRITE_FAILURE );
-				}
-				catch ( SocketException e )
-				{
-					reportError( "Socket exception", e, ErrorManager.WRITE_FAILURE );
-				}
-				catch ( IOException e )
-				{
-					reportError( "IO exception", e, ErrorManager.WRITE_FAILURE );
-				}
-			}
-		}
-        if ( null == gelfSender ||
-                !gelfSender.sendMessage( makeMessage( record ) ) )
-        {
-            reportError( "Could not send GELF message", null, ErrorManager.WRITE_FAILURE );
+
+        if (formatted.length() == 0) {
+            return;
+        }
+
+        if (gelfSender == null) {
+            if (graylogHost == null) {
+                reportError("Graylog2 hostname is empty!", null, ErrorManager.WRITE_FAILURE);
+                return;
+            }
+
+            try {
+                if (graylogHost.startsWith("tcp:")) {
+                    gelfSender = new GelfTCPSender(graylogHost.substring(0, 4), graylogPort);
+                } else if (graylogHost.startsWith("udp:")) {
+                    gelfSender = new GelfUDPSender(graylogHost.substring(0, 4), graylogPort);
+                } else {
+                    gelfSender = new GelfUDPSender(graylogHost, graylogPort);
+                }
+            } catch (UnknownHostException e) {
+                reportError("Unknown Graylog2 hostname:" + graylogHost, e, ErrorManager.WRITE_FAILURE);
+            } catch (SocketException e) {
+                reportError("Socket exception", e, ErrorManager.WRITE_FAILURE);
+            } catch (IOException e) {
+                reportError("IO exception", e, ErrorManager.WRITE_FAILURE);
+            }
+        }
+
+        if (gelfSender == null || !gelfSender.sendMessage(makeMessage(record))) {
+            reportError("Could not send GELF message", null, ErrorManager.WRITE_FAILURE);
         }
     }
+
 
     @Override
     public void close()
@@ -271,7 +272,7 @@ public class GelfHandler
                         String.valueOf( levelToSyslogLevel( record.getLevel() ) ) );
         gelfMessage.addField( "SourceClassName", record.getSourceClassName() );
         gelfMessage.addField( "SourceMethodName", record.getSourceMethodName() );
-        
+
         final String instanceName = System.getProperty("jboss.server.name");
         if (instanceName != null && !instanceName.isEmpty()) {
            gelfMessage.addField("instanceName", instanceName);
