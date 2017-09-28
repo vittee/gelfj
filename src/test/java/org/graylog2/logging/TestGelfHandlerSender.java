@@ -19,11 +19,11 @@ public class TestGelfHandlerSender extends GelfUDPSender
 
     @Override
     public boolean sendMessage(GelfMessage message) {
-        this.lastMessage = message;
+        lastMessage = message;
         return true;
     }
 
     public GelfMessage getLastMessage() {
-        return this.lastMessage;
+        return lastMessage;
     }
 }
