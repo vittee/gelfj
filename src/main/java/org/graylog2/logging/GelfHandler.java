@@ -6,7 +6,6 @@ import org.graylog2.GelfTCPSender;
 import org.graylog2.GelfUDPSender;
 import org.jboss.logmanager.ExtHandler;
 import org.jboss.logmanager.ExtLogRecord;
-import org.jboss.logmanager.MDC;
 
 import java.io.IOException;
 import java.io.PrintWriter;
@@ -20,6 +19,7 @@ import java.util.IllegalFormatConversionException;
 import java.util.Map;
 import java.util.logging.*;
 
+@SuppressWarnings("unused")
 public class GelfHandler extends ExtHandler {
     private static final int MAX_SHORT_MESSAGE_LENGTH = 250;
     private static final Map<String, Integer> LOG4J_LOGLEVELS;
@@ -194,8 +194,7 @@ public class GelfHandler extends ExtHandler {
             if (gelfSender == null || !gelfSender.sendMessage(makeMessage(record))) {
                 reportError("Could not send GELF message", null, ErrorManager.WRITE_FAILURE);
             }
-        }
-        catch (Exception e) {
+        } catch (Exception e) {
             reportError("Could not send GELF message", e, ErrorManager.WRITE_FAILURE);
         }
     }
